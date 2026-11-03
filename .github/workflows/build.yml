@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build toolchain image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ps4-remote-pkg-installer-builder:latest
+          build-args: OO_TOOLCHAIN_VERSION=v0.5.2
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build PKG
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src ps4-remote-pkg-installer-builder:latest \
+            sh -c "make -f Makefile.openorbis clean && make -f Makefile.openorbis all"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote_pkg_installer
+          path: |
+            build/remote_pkg_installer.pkg
+            build/remote_pkg_installer.self
+            build/remote_pkg_installer.oelf
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            build/remote_pkg_installer.pkg
+            build/remote_pkg_installer.self
+          fail_on_unmatched_files: true
