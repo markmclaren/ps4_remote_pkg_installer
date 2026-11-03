@@ -1,3 +1,5 @@
 build/*
 obj/*
 sce_module/*
+thirdparty/*/build/*
+thirdparty/*/obj/*

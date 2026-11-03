@@ -1,0 +1,8 @@
+.git
+obj
+build
+thirdparty/sandbird/obj
+thirdparty/sandbird/build
+thirdparty/tiny-json/obj
+thirdparty/tiny-json/build
+

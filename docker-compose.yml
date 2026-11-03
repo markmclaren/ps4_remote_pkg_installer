@@ -1,0 +1,13 @@
+services:
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OO_TOOLCHAIN_VERSION: v0.5.2
+    pull_policy: build
+    image: ps4-remote-pkg-installer-builder:latest
+    working_dir: /src
+    volumes:
+      - .:/src
+    command: ["make", "-f", "Makefile.openorbis"]
