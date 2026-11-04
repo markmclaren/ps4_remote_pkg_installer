@@ -353,13 +353,13 @@ function formatTime(sec) {
 }
 
 function getStatus(bits) {
-  const b = typeof bits === 'string' ? parseInt(bits, 16) : bits;
+  const b = (typeof bits === 'string' ? parseInt(bits, 16) : bits) & 0xff;
   switch (b) {
-    case 0x18a: return { text: 'Downloading', cls: 'status-downloading' };
-    case 0x18e: return { text: 'Installing', cls: 'status-installing' };
-    case 0x193: return { text: 'Installed', cls: 'status-installed' };
-    case 0x1a8: return { text: 'Paused', cls: 'status-paused' };
-    case 0x188: return { text: 'Stopped', cls: 'status-stopped' };
+    case 0x8a: return { text: 'Downloading', cls: 'status-downloading' };
+    case 0x8e: return { text: 'Installing', cls: 'status-installing' };
+    case 0x93: return { text: 'Installed', cls: 'status-installed' };
+    case 0xa8: return { text: 'Paused', cls: 'status-paused' };
+    case 0x88: return { text: 'Stopped', cls: 'status-stopped' };
     default: return { text: 'In Progress', cls: 'status-downloading' };
   }
 }

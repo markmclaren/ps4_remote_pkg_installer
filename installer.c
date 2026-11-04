@@ -698,7 +698,7 @@ bool bgft_download_get_task_progress(int task_id, struct bgft_download_task_prog
 
 	memset(progress_info, 0, sizeof(*progress_info));
 	{
-		progress_info->bits = tmp_progress_info.bits;
+		progress_info->bits = tmp_progress_info.bits & 0x1FF;
 		progress_info->error_result = tmp_progress_info.errorResult;
 		progress_info->length = tmp_progress_info.length;
 		progress_info->transferred = tmp_progress_info.transferred;
