@@ -530,10 +530,17 @@ static inline bool handle_api_install_direct(sb_Stream* s, const json_t* root) {
 	snprintf(icon_path, sizeof(icon_path), "/user%s/%s.png", s_work_dir, tmp_name);
 
 	if (bgft_download_register_package_task(content_id, content_url, title_name, has_icon ? icon_path : NULL, package_type, package_sub_type, package_size, is_patch, &task_id, &ret)) {
-		track_task_add(task_id, title_name, content_id);
+		if (task_id >= 0) {
+			track_task_add(task_id, title_name, content_id);
+		} else {
+			unlink(ref_pkg_json_path);
+			unlink(icon0_png_path);
+		}
 		kick_result_header_json(s);
 		sb_writef(s, "{ \"status\": \"success\", \"task_id\": %d, \"title\": \"%s\" }\n", task_id, escaped_title_name);
 	} else {
+		unlink(ref_pkg_json_path);
+		unlink(icon0_png_path);
 		kick_error_json(s, ret);
 	}
 
@@ -716,10 +723,17 @@ static inline bool handle_api_install_ref_pkg_url(sb_Stream* s, const json_t* ro
 	snprintf(icon_path, sizeof(icon_path), "/user%s/%s.png", s_work_dir, tmp_name);
 
 	if (bgft_download_register_package_task(content_id, content_url, title_name, has_icon ? icon_path : NULL, package_type, package_sub_type, package_size, is_patch, &task_id, &ret)) {
-		track_task_add(task_id, title_name, content_id);
+		if (task_id >= 0) {
+			track_task_add(task_id, title_name, content_id);
+		} else {
+			unlink(ref_pkg_json_path);
+			unlink(icon0_png_path);
+		}
 		kick_result_header_json(s);
 		sb_writef(s, "{ \"status\": \"success\", \"task_id\": %d, \"title\": \"%s\" }\n", task_id, escaped_title_name);
 	} else {
+		unlink(ref_pkg_json_path);
+		unlink(icon0_png_path);
 		kick_error_json(s, ret);
 	}
 

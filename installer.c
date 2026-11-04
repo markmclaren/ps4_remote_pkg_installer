@@ -415,7 +415,7 @@ bool bgft_download_register_package_task(const char* content_id, const char* con
 		if (error) {
 			*error = ret;
 		}
-		if (ret == SCE_BGFT_ERROR_SAME_APPLICATION_ALREADY_INSTALLED) {
+		if (ret == SCE_BGFT_ERROR_SAME_APPLICATION_ALREADY_INSTALLED || ret == SCE_BGFT_ERROR_PACKAGE_ALREADY_INSTALLED) {
 			task_id = -1;
 			//printf("Package already installed.\n");
 			goto done;
