@@ -7,8 +7,9 @@
 #include <appinst_util.h>
 #include <bgft.h>
 #include <sys/param.h>
+#include <pthread.h>
 
-#define BGFT_HEAP_SIZE (1 * 1024 * 1024)
+#define BGFT_HEAP_SIZE (4 * 1024 * 1024)
 
 #define WAIT_TIME (UINT64_C(5) * 1000 * 1000) /* 5 secs */
 
@@ -16,6 +17,9 @@ static SceBgftInitParams s_bgft_init_params;
 
 static bool s_app_inst_util_initialized = false;
 static bool s_bgft_initialized = false;
+
+static pthread_mutex_t s_appinst_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t s_bgft_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static bool modify_download_task_for_patch_internal(const char* path, int index);
 static bool modify_download_task_for_patch(SceBgftTaskId task_id);
@@ -221,7 +225,9 @@ bool app_inst_util_is_exists(const char* title_id, bool* exists, int* error) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_appinst_mutex);
 	ret = sceAppInstUtilAppExists(title_id, &flag);
+	pthread_mutex_unlock(&s_appinst_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -259,7 +265,9 @@ bool app_inst_util_get_size(const char* title_id, unsigned long* size, int* erro
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_appinst_mutex);
 	ret = sceAppInstUtilAppGetSize(title_id, size);
+	pthread_mutex_unlock(&s_appinst_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -395,12 +403,14 @@ bool bgft_download_register_package_task(const char* content_id, const char* con
 
 	task_id = SCE_BGFT_INVALID_TASK_ID;
 
+	pthread_mutex_lock(&s_bgft_mutex);
 	if (!is_patch) {
 		ret = sceBgftDownloadRegisterTask(&params, &task_id);
 		//ret = sceBgftDownloadRegisterTaskStoreWithErrorInfo(&params, &task_id, &error_info);
 	} else {
 		ret = sceBgftDebugDownloadRegisterPkg(&params, &task_id);
 	}
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -444,7 +454,9 @@ bool bgft_download_start_task(int task_id, int* error) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadStartTask((SceBgftTaskId)task_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -478,7 +490,9 @@ bool bgft_download_stop_task(int task_id, int* error) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadStopTask((SceBgftTaskId)task_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -512,7 +526,9 @@ bool bgft_download_pause_task(int task_id, int* error) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadPauseTask((SceBgftTaskId)task_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -546,7 +562,9 @@ bool bgft_download_resume_task(int task_id, int* error) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadResumeTask((SceBgftTaskId)task_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -580,7 +598,9 @@ bool bgft_download_unregister_task(int task_id, int* error) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadUnregisterTask((SceBgftTaskId)task_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -616,7 +636,9 @@ bool bgft_download_reregister_task_patch(int old_task_id, int* new_task_id, int*
 	}
 
 	tmp_id = SCE_BGFT_INVALID_TASK_ID;
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadReregisterTaskPatch((SceBgftTaskId)old_task_id, &tmp_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -663,7 +685,9 @@ bool bgft_download_get_task_progress(int task_id, struct bgft_download_task_prog
 	}
 
 	memset(&tmp_progress_info, 0, sizeof(tmp_progress_info));
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftDownloadGetProgress((SceBgftTaskId)task_id, &tmp_progress_info);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;
@@ -722,7 +746,9 @@ bool bgft_download_find_task_by_content_id(const char* content_id, int sub_type,
 	}
 
 	tmp_id = SCE_BGFT_INVALID_TASK_ID;
+	pthread_mutex_lock(&s_bgft_mutex);
 	ret = sceBgftServiceDownloadFindTaskByContentId(content_id, (SceBgftTaskSubType)sub_type, &tmp_id);
+	pthread_mutex_unlock(&s_bgft_mutex);
 	if (ret) {
 		if (error) {
 			*error = ret;

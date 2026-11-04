@@ -4,13 +4,16 @@
 #include <libhttp.h>
 
 #include <np_util.h>
+#include <pthread.h>
 
-#define HTTP_HEAP_SIZE (1024 * 1024)
-#define SSL_HEAP_SIZE (128 * 1024)
+#define HTTP_HEAP_SIZE (4 * 1024 * 1024)
+#define SSL_HEAP_SIZE (512 * 1024)
 
-#define DOWNLOAD_CHUNK_SIZE (16384)
+#define DOWNLOAD_CHUNK_SIZE (65536)
 
 #define USER_AGENT "Download/1.00"
+
+static pthread_mutex_t s_http_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct download_file_cb_args {
 	uint8_t* data;
@@ -119,16 +122,20 @@ bool http_get_file_size(const char* url, uint64_t* total_size) {
 	}
 
 	memset(&args, 0, sizeof(args));
-	{
-		args.data_size = 0;
-	}
+	args.data_size = 0;
 
-	ret = do_request(url, SCE_HTTP_METHOD_GET, NULL, 0, NULL, 0, &download_file_cb, &args);
-	if (ret) {
-		goto err;
-	}
-	if (!is_good_status(args.status_code)) {
-		goto err;
+	/* Try HEAD first so the server does not start streaming a multi-GB body */
+	ret = do_request(url, SCE_HTTP_METHOD_HEAD, NULL, 0, NULL, 0, &download_file_cb, &args);
+	if (ret || !is_good_status(args.status_code) || args.content_length == UINT64_MAX) {
+		memset(&args, 0, sizeof(args));
+		args.data_size = 0;
+		ret = do_request(url, SCE_HTTP_METHOD_GET, NULL, 0, NULL, 0, &download_file_cb, &args);
+		if (ret) {
+			goto err;
+		}
+		if (!is_good_status(args.status_code)) {
+			goto err;
+		}
 	}
 
 	if (total_size) {
@@ -138,16 +145,21 @@ bool http_get_file_size(const char* url, uint64_t* total_size) {
 	status = true;
 
 err:
+	if (args.data) {
+		free(args.data);
+	}
 	return status;
 }
 
 bool http_download_file(const char* url, uint8_t** data, uint64_t* data_size, uint64_t* total_size, uint64_t offset) {
 	struct download_file_cb_args args;
-	uint8_t chunk[DOWNLOAD_CHUNK_SIZE];
+	uint8_t* chunk = NULL;
 	const size_t max_headers = 8;
 	const char* headers[max_headers * 2];
 	size_t header_count = 0;
 	char range_str[48];
+	uint64_t head_total_size = 0;
+	bool have_head_total = false;
 	bool status = false;
 	int ret;
 
@@ -158,11 +170,24 @@ bool http_download_file(const char* url, uint8_t** data, uint64_t* data_size, ui
 		goto err;
 	}
 
+	chunk = (uint8_t*)malloc(DOWNLOAD_CHUNK_SIZE);
+	if (!chunk) {
+		goto err;
+	}
+
 	memset(&args, 0, sizeof(args));
 	{
 		args.data_size = data_size ? *data_size : (uint64_t)-1;
 		args.chunk = chunk;
-		args.chunk_size = sizeof(chunk);
+		args.chunk_size = DOWNLOAD_CHUNK_SIZE;
+	}
+
+	/* If caller wants total_size as well as a bounded slice at offset 0, get total_size via HEAD
+	 * so we can use a Range request instead of triggering an unbounded multi-GB GET stream. */
+	if (total_size && offset == 0 && args.data_size > 0 && args.data_size != (uint64_t)-1) {
+		if (http_get_file_size(url, &head_total_size) && head_total_size > 0 && head_total_size != UINT64_MAX) {
+			have_head_total = true;
+		}
 	}
 
 	memset(headers, 0, sizeof(headers));
@@ -172,7 +197,7 @@ bool http_download_file(const char* url, uint8_t** data, uint64_t* data_size, ui
 		++header_count;
 	}
 
-	if (offset > 0 && args.data_size > 0) {
+	if (args.data_size > 0 && args.data_size != (uint64_t)-1 && (offset > 0 || have_head_total)) {
 		snprintf(range_str, sizeof(range_str), "bytes=%" PRIu64 "-%" PRIu64, offset, offset + args.data_size - 1);
 		headers[header_count * 2 + 0] = "Range";
 		headers[header_count * 2 + 1] = range_str;
@@ -184,7 +209,7 @@ bool http_download_file(const char* url, uint8_t** data, uint64_t* data_size, ui
 		goto err_data_free;
 	}
 	if (!is_good_status(args.status_code)) {
-		goto err;
+		goto err_data_free;
 	}
 
 	if (data) {
@@ -195,7 +220,7 @@ bool http_download_file(const char* url, uint8_t** data, uint64_t* data_size, ui
 		*data_size = args.actual_size;
 	}
 	if (total_size) {
-		*total_size = args.content_length;
+		*total_size = have_head_total ? head_total_size : args.content_length;
 	}
 
 	status = true;
@@ -206,6 +231,9 @@ err_data_free:
 	}
 
 err:
+	if (chunk) {
+		free(chunk);
+	}
 	return status;
 }
 
@@ -223,7 +251,9 @@ bool http_escape_uri(char** out, size_t* out_size, const char* in) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_http_mutex);
 	ret = sceHttpUriEscape(NULL, &tmp_size, 0, in);
+	pthread_mutex_unlock(&s_http_mutex);
 	if (ret) {
 		EPRINTF("sceHttpUriEscape failed: 0x%08X\n", ret);
 		goto err;
@@ -236,7 +266,9 @@ bool http_escape_uri(char** out, size_t* out_size, const char* in) {
 	}
 	memset(tmp, 0, tmp_size);
 
+	pthread_mutex_lock(&s_http_mutex);
 	ret = sceHttpUriEscape(tmp, out_size, tmp_size, in);
+	pthread_mutex_unlock(&s_http_mutex);
 	if (ret) {
 		EPRINTF("sceHttpUriEscape failed: 0x%08X\n", ret);
 		goto err;
@@ -271,7 +303,9 @@ bool http_unescape_uri(char** out, size_t* out_size, const char* in) {
 		goto err;
 	}
 
+	pthread_mutex_lock(&s_http_mutex);
 	ret = sceHttpUriUnescape(NULL, &tmp_size, 0, in);
+	pthread_mutex_unlock(&s_http_mutex);
 	if (ret) {
 		EPRINTF("sceHttpUriUnescape failed: 0x%08X\n", ret);
 		goto err;
@@ -284,7 +318,9 @@ bool http_unescape_uri(char** out, size_t* out_size, const char* in) {
 	}
 	memset(tmp, 0, tmp_size);
 
+	pthread_mutex_lock(&s_http_mutex);
 	ret = sceHttpUriUnescape(tmp, out_size, tmp_size, in);
+	pthread_mutex_unlock(&s_http_mutex);
 	if (ret) {
 		EPRINTF("sceHttpUriUnescape failed: 0x%08X\n", ret);
 		goto err;
@@ -307,19 +343,26 @@ err:
 
 bool http_escape_json_string(char* out, size_t max_out_size, const char* in) {
 	bool status = false;
+	size_t in_len;
 	int ret;
 
 	if (!s_http_initialized) {
 		goto err;
 	}
 
-	if (!in) {
+	if (!in || !out || max_out_size == 0) {
 		goto err;
 	}
 
 	memset(out, 0, max_out_size);
+	in_len = strlen(in);
+	if (in_len == 0) {
+		return true;
+	}
 
-	ret = sceNpUtilJsonEscape(out, max_out_size, in, strlen(in));
+	pthread_mutex_lock(&s_http_mutex);
+	ret = sceNpUtilJsonEscape(out, max_out_size, in, in_len);
+	pthread_mutex_unlock(&s_http_mutex);
 	if (ret) {
 		EPRINTF("sceNpUtilJsonEscape failed: 0x%08X\n", ret);
 		goto err;
@@ -370,7 +413,11 @@ static int download_file_cb(void* arg, int req_id, int status_code, uint64_t con
 	} else {
 		total_size = args->data_size;
 	}
-	if (total_size > 0 && !args->chunk) {
+	if (total_size == 0) {
+		ret = 0;
+		goto err_partial_xfer;
+	}
+	if (!args->chunk) {
 		ret = SCE_HTTP_ERROR_INVALID_VALUE;
 		goto err;
 	}
@@ -427,6 +474,8 @@ static int do_request(const char* url, int method, const void* data, size_t data
 	if (!headers) {
 		header_count = 0;
 	}
+
+	pthread_mutex_lock(&s_http_mutex);
 
 	ret = sceHttpCreateTemplate(s_libhttp_ctx_id, USER_AGENT, SCE_HTTP_VERSION_1_1, SCE_TRUE);
 	if (ret < 0) {
@@ -514,6 +563,7 @@ err_tpl_delete:
 	}
 
 err:
+	pthread_mutex_unlock(&s_http_mutex);
 	return ret;
 }
 

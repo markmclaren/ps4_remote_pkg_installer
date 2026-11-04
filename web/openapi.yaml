@@ -1,0 +1,618 @@
+openapi: 3.0.3
+info:
+  title: PS4 Remote PKG Installer API
+  description: REST API exposed by the PlayStation 4 Remote Package Installer daemon on port 12800. Enables remote deployment, task monitoring, and package management for PS4 homebrew and package files.
+  version: 1.0.0
+servers:
+  - url: /
+    description: Current PS4 Host
+tags:
+  - name: Installation
+    description: Trigger remote PKG downloads and installation
+  - name: Tasks
+    description: Manage and query background download/install tasks
+  - name: Titles & Content
+    description: Inspect and uninstall games, patches, themes, and DLC
+  - name: System & Docs
+    description: Web dashboard and OpenAPI specifications
+paths:
+  /api/install:
+    post:
+      tags:
+        - Installation
+      summary: Initiate PKG installation
+      description: Instructs the PS4 background downloader (bgft) to download and install a PKG from HTTP URLs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/InstallDirectRequest'
+                - $ref: '#/components/schemas/InstallRefPkgUrlRequest'
+            examples:
+              directSingle:
+                summary: Direct Single PKG
+                value:
+                  type: direct
+                  packages:
+                    - http://192.168.1.100:8080/MyGame.pkg
+              directMultiPart:
+                summary: Direct Multi-Part PKG
+                value:
+                  type: direct
+                  packages:
+                    - http://192.168.1.100:8080/MyGame_0.pkg
+                    - http://192.168.1.100:8080/MyGame_1.pkg
+              refPkgUrl:
+                summary: Reference PKG JSON URL
+                value:
+                  type: ref_pkg_url
+                  url: http://192.168.1.100:8080/ref_pkg.json
+      responses:
+        '200':
+          description: Task successfully created or failure code returned
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/InstallSuccessResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+
+  /api/tasks:
+    get:
+      tags:
+        - Tasks
+      summary: List all tracked tasks
+      description: Returns all currently active, downloading, installing, paused, or completed tasks being tracked by the server.
+      responses:
+        '200':
+          description: List of tracked tasks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+
+  /api/get_task_progress:
+    post:
+      tags:
+        - Tasks
+      summary: Get live task progress
+      description: Fetches raw transferred bytes, progress percentages, status bits, and estimated remaining seconds for a given task ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskIdRequest'
+      responses:
+        '200':
+          description: Progress information
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/TaskProgressResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+
+  /api/find_task:
+    post:
+      tags:
+        - Tasks
+      summary: Find task by content ID
+      description: Looks up the numeric task ID for an ongoing background download by its content ID and sub_type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FindTaskRequest'
+      responses:
+        '200':
+          description: Task lookup response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      status:
+                        type: string
+                        example: success
+                      task_id:
+                        type: integer
+                        example: 12
+                  - $ref: '#/components/schemas/ErrorResponse'
+
+  /api/start_task:
+    post:
+      tags:
+        - Tasks
+      summary: Start background task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskIdRequest'
+      responses:
+        '200':
+          description: Success or failure status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/stop_task:
+    post:
+      tags:
+        - Tasks
+      summary: Stop / cancel background task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskIdRequest'
+      responses:
+        '200':
+          description: Success or failure status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/pause_task:
+    post:
+      tags:
+        - Tasks
+      summary: Pause downloading task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskIdRequest'
+      responses:
+        '200':
+          description: Success or failure status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/resume_task:
+    post:
+      tags:
+        - Tasks
+      summary: Resume paused task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskIdRequest'
+      responses:
+        '200':
+          description: Success or failure status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/unregister_task:
+    post:
+      tags:
+        - Tasks
+      summary: Unregister / delete task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskIdRequest'
+      responses:
+        '200':
+          description: Success or failure status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/is_exists:
+    post:
+      tags:
+        - Titles & Content
+      summary: Check if Title ID is installed
+      description: Queries AppInstUtil to verify whether a given PlayStation title ID exists on the system storage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TitleIdRequest'
+            example:
+              title_id: CUSA00129
+      responses:
+        '200':
+          description: Installed status and size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IsExistsResponse'
+
+  /api/uninstall_game:
+    post:
+      tags:
+        - Titles & Content
+      summary: Uninstall game by Title ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TitleIdRequest'
+      responses:
+        '200':
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/uninstall_patch:
+    post:
+      tags:
+        - Titles & Content
+      summary: Uninstall update patch by Title ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TitleIdRequest'
+      responses:
+        '200':
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/uninstall_ac:
+    post:
+      tags:
+        - Titles & Content
+      summary: Uninstall additional content (DLC) by Content ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContentIdRequest'
+      responses:
+        '200':
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /api/uninstall_theme:
+    post:
+      tags:
+        - Titles & Content
+      summary: Uninstall theme by Content ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContentIdRequest'
+      responses:
+        '200':
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericStatusResponse'
+
+  /:
+    get:
+      tags:
+        - System & Docs
+      summary: Web Dashboard
+      description: Interactive HTML dashboard to view transfers and check titles in browser.
+      responses:
+        '200':
+          description: HTML Dashboard
+          content:
+            text/html: {}
+
+  /docs:
+    get:
+      tags:
+        - System & Docs
+      summary: Swagger UI Documentation
+      description: Interactive Swagger UI documentation page.
+      responses:
+        '200':
+          description: Swagger UI HTML
+          content:
+            text/html: {}
+
+  /openapi.json:
+    get:
+      tags:
+        - System & Docs
+      summary: OpenAPI Specification (JSON)
+      responses:
+        '200':
+          description: OpenAPI JSON Specification
+          content:
+            application/json: {}
+
+  /openapi.yaml:
+    get:
+      tags:
+        - System & Docs
+      summary: OpenAPI Specification (YAML)
+      responses:
+        '200':
+          description: OpenAPI YAML Specification
+          content:
+            application/yaml: {}
+
+components:
+  schemas:
+    InstallDirectRequest:
+      type: object
+      required:
+        - type
+        - packages
+      properties:
+        type:
+          type: string
+          enum: [direct]
+          example: direct
+        packages:
+          type: array
+          description: List of URLs to PKG files (single PKG or ordered parts).
+          items:
+            type: string
+            format: uri
+          example:
+            - http://192.168.1.100:8080/Game.pkg
+
+    InstallRefPkgUrlRequest:
+      type: object
+      required:
+        - type
+        - url
+      properties:
+        type:
+          type: string
+          enum: [ref_pkg_url]
+          example: ref_pkg_url
+        url:
+          type: string
+          format: uri
+          description: URL to a JSON manifest listing pieces for piece-wise PKG delivery.
+          example: http://192.168.1.100:8080/ref_pkg.json
+
+    InstallSuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        task_id:
+          type: integer
+          example: 4
+        title:
+          type: string
+          example: Game Title
+
+    TaskIdRequest:
+      type: object
+      required:
+        - task_id
+      properties:
+        task_id:
+          type: integer
+          description: Numeric ID of the background task
+          example: 4
+
+    TitleIdRequest:
+      type: object
+      required:
+        - title_id
+      properties:
+        title_id:
+          type: string
+          description: PS4 Title ID
+          example: CUSA00129
+
+    ContentIdRequest:
+      type: object
+      required:
+        - content_id
+      properties:
+        content_id:
+          type: string
+          description: Full PS4 Content ID
+          example: UP0001-CUSA00129_00-THEME00000000001
+
+    FindTaskRequest:
+      type: object
+      required:
+        - content_id
+        - sub_type
+      properties:
+        content_id:
+          type: string
+          example: UP0001-CUSA00129_00-MYGAME0000000000
+        sub_type:
+          type: integer
+          description: Package sub type integer
+          example: 6
+
+    TaskProgressResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        bits:
+          type: string
+          description: Hex string representing task status bits (e.g. 0x18a = downloading, 0x18e = installing, 0x193 = finished)
+          example: "0x18A"
+        error:
+          type: integer
+          description: Error result code (0 = OK)
+          example: 0
+        length:
+          type: string
+          description: Hex bytes of current file
+          example: "0x40000000"
+        transferred:
+          type: string
+          description: Hex transferred bytes of current file
+          example: "0x20000000"
+        length_total:
+          type: string
+          description: Hex total bytes across all parts
+          example: "0x40000000"
+        transferred_total:
+          type: string
+          description: Hex total transferred bytes across all parts
+          example: "0x20000000"
+        num_index:
+          type: integer
+          description: Current chunk/file index (0-based)
+          example: 0
+        num_total:
+          type: integer
+          description: Total chunks count
+          example: 1
+        rest_sec:
+          type: integer
+          description: Estimated remaining seconds for current file
+          example: 120
+        rest_sec_total:
+          type: integer
+          description: Estimated remaining seconds for total task
+          example: 120
+        preparing_percent:
+          type: integer
+          example: 100
+        local_copy_percent:
+          type: integer
+          example: 0
+
+    TrackedTaskItem:
+      type: object
+      properties:
+        task_id:
+          type: integer
+          example: 4
+        title:
+          type: string
+          example: My Awesome Game
+        content_id:
+          type: string
+          example: UP0001-CUSA00129_00-MYGAME0000000000
+        bits:
+          type: integer
+          example: 394
+        bits_hex:
+          type: string
+          example: "0x18A"
+        error:
+          type: integer
+          example: 0
+        length:
+          type: integer
+          format: int64
+          example: 4294967296
+        transferred:
+          type: integer
+          format: int64
+          example: 2147483648
+        length_total:
+          type: integer
+          format: int64
+          example: 4294967296
+        transferred_total:
+          type: integer
+          format: int64
+          example: 2147483648
+        num_index:
+          type: integer
+          example: 0
+        num_total:
+          type: integer
+          example: 1
+        rest_sec:
+          type: integer
+          example: 60
+        rest_sec_total:
+          type: integer
+          example: 60
+        preparing_percent:
+          type: integer
+          example: 100
+        local_copy_percent:
+          type: integer
+          example: 0
+
+    TaskListResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackedTaskItem'
+
+    IsExistsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        exists:
+          type: string
+          enum: [true, false]
+          example: "true"
+        size:
+          type: string
+          description: Hex size in bytes if installed
+          example: "0x120000000"
+
+    GenericStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        error_code:
+          type: string
+          description: Hex error code if failed
+          example: "0x80990001"
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: fail
+        error_code:
+          type: string
+          example: "0x80990001"
+        error:
+          type: string
+          example: Internal server error message
+

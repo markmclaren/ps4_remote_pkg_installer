@@ -22,8 +22,13 @@
 		<file targ_path="sce_sys/pic0.png" orig_path="sce_sys\pic0.png"/>
 		<file targ_path="sce_sys/pic1.png" orig_path="sce_sys\pic1.png"/>
 		<file targ_path="eboot.bin" orig_path="build\remote_pkg_installer.self"/>
+		<file targ_path="web/index.html" orig_path="web\index.html"/>
+		<file targ_path="web/docs.html" orig_path="web\docs.html"/>
+		<file targ_path="web/openapi.json" orig_path="web\openapi.json"/>
+		<file targ_path="web/openapi.yaml" orig_path="web\openapi.yaml"/>
 	</files>
 	<rootdir>
 		<dir targ_name="sce_sys"/>
+		<dir targ_name="web"/>
 	</rootdir>
 </psproject>

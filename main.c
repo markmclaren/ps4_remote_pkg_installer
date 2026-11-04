@@ -1,4 +1,4 @@
-﻿#include "installer.h"
+#include "installer.h"
 #include "net.h"
 #include "http.h"
 #include "server.h"

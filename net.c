@@ -3,7 +3,7 @@
 #include <libnetctl.h>
 #include <kernel_ex.h>
 
-#define NET_HEAP_SIZE (1 * 1024 * 1024)
+#define NET_HEAP_SIZE (4 * 1024 * 1024)
 
 static int s_libnet_mem_id = -1;
 

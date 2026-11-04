@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PS4 Remote PKG Installer - API Reference</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --accent: #0284c7;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #fafafa;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .top-nav {
+      background: var(--bg);
+      color: var(--text);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+    .top-nav .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #38bdf8;
+      text-decoration: none;
+    }
+    .top-nav .links {
+      display: flex;
+      gap: 12px;
+    }
+    .top-nav a.nav-btn {
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 6px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      transition: all 0.2s;
+    }
+    .top-nav a.nav-btn:hover {
+      background: #334155;
+      border-color: var(--accent);
+    }
+    #swagger-ui {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-bottom: 40px;
+    }
+    /* Clean overrides for swagger-ui */
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui .info { margin: 24px 0; }
+  </style>
+</head>
+<body>
+  <div class="top-nav">
+    <a href="/" class="brand">
+      <span>🎮 PS4 Remote PKG Installer</span>
+    </a>
+    <div class="links">
+      <a href="/" class="nav-btn">← Back to Dashboard</a>
+      <a href="/openapi.json" target="_blank" class="nav-btn">openapi.json</a>
+      <a href="/openapi.yaml" target="_blank" class="nav-btn">openapi.yaml</a>
+    </div>
+  </div>
+
+  <div id="swagger-ui"></div>
+
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout",
+        defaultModelsExpandDepth: 1,
+        defaultModelExpandDepth: 1,
+        docExpansion: "list",
+        filter: true,
+        showExtensions: true,
+        showCommonExtensions: true,
+        tryItOutEnabled: true
+      });
+    };
+  </script>
+</body>
+</html>
+

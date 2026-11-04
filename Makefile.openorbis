@@ -78,27 +78,29 @@ $(OBJDIR)/%.c.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+AUTHINFO = 000000000000000000000000001C004000FF000000000080000000000000000000000000000000000000008000400040000000000000008000000000000000080040FFFF000000F000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
 eboot: pre-build thirdparty $(OBJS)
 	$(LD) $(LDFLAGS) -o $(BLDDIR)/$(TARGET).elf $(TOOLCHAIN)/lib/crt1.o $(OBJS) $(LIBS)
-	$(CREATE_FSELF) -in=$(BLDDIR)/$(TARGET).elf -out=$(BLDDIR)/$(TARGET).oelf --eboot=$(BLDDIR)/$(TARGET).self --paid=0x3800000000000010
+	$(CREATE_FSELF) -in $(BLDDIR)/$(TARGET).elf -out $(BLDDIR)/$(TARGET).oelf -eboot $(BLDDIR)/$(TARGET).self -paid 0x3800000000000011 -authinfo $(AUTHINFO)
 
 sfo: pre-build
 	$(PUBCMD) sfo_new $(BLDDIR)/param.sfo
-	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo APP_TYPE --type Integer --maxsize 4 --value 0
+	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo APP_TYPE --type Integer --maxsize 4 --value 1
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo APP_VER --type Utf8 --maxsize 8 --value '$(APP_VER)'
-	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo ATTRIBUTE --type Integer --maxsize 4 --value 18
-	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo CATEGORY --type Utf8 --maxsize 4 --value 'gde'
+	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo ATTRIBUTE --type Integer --maxsize 4 --value 0
+	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo CATEGORY --type Utf8 --maxsize 4 --value 'gd'
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo FORMAT --type Utf8 --maxsize 4 --value 'obs'
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo PARENTAL_LEVEL --type Integer --maxsize 4 --value 1
-	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo SYSTEM_VER --type Integer --maxsize 4 --value 1020
+	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo SYSTEM_VER --type Integer --maxsize 4 --value 0
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo TITLE --type Utf8 --maxsize 128 --value '$(TITLE)'
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo TITLE_ID --type Utf8 --maxsize 12 --value '$(TITLE_ID)'
 	$(PUBCMD) sfo_setentry $(BLDDIR)/param.sfo VERSION --type Utf8 --maxsize 8 --value '$(APP_VER)'
 
 pkg: sfo eboot
-	@sed -e 's/orig_path="build\\/orig_path="/g' -e 's/orig_path="sce_sys\\/orig_path="..\/sce_sys\//g' $(TARGET).gp4 > $(BLDDIR)/$(TARGET).gp4
+	@sed -e 's/orig_path="build\\/orig_path="/g' -e 's/orig_path="sce_sys\\/orig_path="..\/sce_sys\//g' -e 's/orig_path="web\\/orig_path="..\/web\//g' -e 's/storage_type="bd25"/storage_type="digital50"/g' -e '/pronunciation/d' $(TARGET).gp4 > $(BLDDIR)/$(TARGET).gp4
 	$(PUBCMD) pkg_build $(BLDDIR)/$(TARGET).gp4 $(BLDDIR)
 	@cp -f $(BLDDIR)/$(CONTENT_ID).pkg $(BLDDIR)/$(TARGET).pkg
 	@echo "Successfully built $(BLDDIR)/$(TARGET).pkg"

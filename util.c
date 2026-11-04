@@ -61,7 +61,7 @@ err:
 
 bool read_file(const char* path, void** data, uint64_t* size, uint64_t max_size, uint64_t* nread) {
 	int fd = -1;
-	struct stat info;
+	off_t end_off;
 	uint64_t file_size, user_size;
 	uint64_t size_left, total = 0;
 	uint8_t* buf = NULL;
@@ -79,10 +79,10 @@ bool read_file(const char* path, void** data, uint64_t* size, uint64_t max_size,
 	if (ret < 0)
 		goto err;
 
-	ret = fstat(fd, &info);
-	if (ret < 0)
+	end_off = lseek(fd, 0, SEEK_END);
+	if (end_off < 0 || lseek(fd, 0, SEEK_SET) < 0)
 		goto err;
-	file_size = (uint64_t)info.st_size;
+	file_size = (uint64_t)end_off;
 
 	/* User may provide his own buffer. */
 	buf = (uint8_t*)*data;

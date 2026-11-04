@@ -1,15 +1,27 @@
 # PS4 Remote Package Installer
 
-> **Note:** The original plain-text [`README`](README) by **flatz** is preserved untouched in this repository. This `README.md` documents the **new 100% open-source Docker / OpenOrbis build system** first, followed by a Markdown-formatted version of the **original README**.
+> **Note:** The original plain-text [`README`](README) by **flatz** is preserved untouched in this repository. This `README.md` documents the **open-source Docker / OpenOrbis build system**, **server modifications**, and **companion Rust CLI** first, followed by a Markdown-formatted version of the **original README**.
+
+This repository is a **modified and modernized version of [flatz's `ps4_remote_pkg_installer`](https://github.com/flatz/ps4_remote_pkg_installer)** (the C server running on the PS4). It is designed and tested to work alongside [**`markmclaren/ps4-remote-pkg-installer-cli`**](https://github.com/markmclaren/ps4-remote-pkg-installer-cli), which is a **Rust CLI rewrite of the original [Java GUI client](https://github.com/BenjaminFaal/ps4-remote-pkg-installer)**.
 
 ---
 
-## What's New: Open-Source Docker & OpenOrbis Build Setup
+## What's New: Server Modifications & OpenOrbis Build
 
 The original project required a proprietary PS4 SDK (`SCE_ORBIS_SDK_DIR`), Windows publishing tools (`orbis-pub-cmd.exe`), and `wine` on Linux/TrueOS—even noting in the original README:
 > *"SDK (oouch! need to move to open source SDK in the future...)"*
 
-This repository now includes a **100% open-source, self-contained Docker build pipeline** powered by the [OpenOrbis PS4 Toolchain](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain) (`v0.5.2`), `clang-12`/`lld-12`, and `LibOrbisPkg` (`PkgTool.Core`), without modifying any original `.c`/`.h` source files.
+This modified server builds with the open-source [OpenOrbis PS4 Toolchain](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain), adds an embedded Web Dashboard & Swagger UI on port `12800`, and fixes several stability and performance bottlenecks when installing large multi-GB `.pkg` files:
+
+### Server Stability & Performance Improvements
+- **Thread-Safe JSON Parsing & Memory Management:** Removed shared `static json_t* pool` pointers across HTTP `POST` handlers in `server.c` and `pkg.c` that caused heap corruption and double-free crashes when concurrent requests arrived (e.g., CLI progress polling overlapping with the Web UI).
+- **Serialized Sony SDK & BGFT Access:** Added mutex synchronization around `sceBgft*`, `sceAppInstUtil*`, `sceHttp*`, and `sceNpUtilJsonEscape` calls, expanded internal `SceNet`, `SceHttp`, and `SceBgft` heaps to 4 MB, and added short-TTL (400 ms) task-progress caching so concurrent polling does not overwhelm `libSceBgft`.
+- **Sandbird HTTP Server Hardening:** Fixed blocking-socket timeout handling, detached worker thread creation (512 KB stack), file descriptor lifecycle bugs, and buffer formatting (`vsnprintf`), and increased file-streaming chunk sizes to 64 KB.
+- **OpenOrbis `struct stat` ABI Fix & Exact File Sizing:** Added a kernel-accurate `struct stat` shim (`docker/oosdk_shim/include/bits/stat.h`) and switched file length queries in `sandbird.c` and `util.c` to `lseek(..., SEEK_END)` so static assets and manifests are always served with their full `Content-Length`.
+- **Bounded HTTP `Range` Metadata Reads:** Updated `http_download_file` and `http_get_file_size` to probe package size via `HEAD` first and fetch the initial PKG header using a bounded `Range: bytes=0-8191` request rather than opening an unbounded multi-GB `GET` stream.
+- **Built-in Web Dashboard & Swagger UI:** Served directly from the PS4 on port `12800`:
+  - `http://<PS4_IP>:12800/` — Live Web Dashboard showing active transfers, speeds, ETAs, pause/resume/stop controls, and a Title ID installation checker (with in-flight polling guards).
+  - `http://<PS4_IP>:12800/docs` — Interactive OpenAPI / Swagger documentation (`/openapi.json`, `/openapi.yaml`).
 
 ### Added Files
 
@@ -18,7 +30,8 @@ This repository now includes a **100% open-source, self-contained Docker build p
 | [`Dockerfile`](Dockerfile) | Multi-stage Ubuntu 20.04 image that downloads OpenOrbis `v0.5.2` (`/opt/openorbis`) and installs Clang 12, LLD 12, and `PkgTool.Core` runtime dependencies. |
 | [`docker-compose.yml`](docker-compose.yml) | Defines the `builder` service (`pull_policy: build`) that mounts the workspace and runs `make -f Makefile.openorbis`. |
 | [`Makefile.openorbis`](Makefile.openorbis) | OpenOrbis Makefile that compiles `thirdparty/sandbird`, `thirdparty/tiny-json`, and the main application, creates the fake-signed `eboot.bin` (`create-fself`), generates `param.sfo`, and packs `build/remote_pkg_installer.pkg` (`PkgTool.Core`). |
-| [`docker/oosdk_shim/include/`](docker/oosdk_shim/include) | Lightweight compatibility header shims mapping the original SDK header names and `sceBgft*` symbols onto OpenOrbis's open-source stub libraries (`libSceBgft`, `libSceAppInstUtil`, `libSceHttp`, `libSceNet`, etc.). |
+| [`docker/oosdk_shim/include/`](docker/oosdk_shim/include) | Compatibility header shims mapping the original SDK header names, `sceBgft*` symbols, and FreeBSD/Orbis `struct stat` layout onto OpenOrbis's open-source stub libraries. |
+| [`web/`](web) | Embedded Web Dashboard (`index.html`), Swagger UI (`docs.html`), and OpenAPI specifications (`openapi.json`, `openapi.yaml`). |
 | [`build.bat`](build.bat) / [`build.ps1`](build.ps1) / [`build.sh`](build.sh) | Cross-platform build scripts for Windows (`cmd` / PowerShell) and Linux/macOS (`bash`). |
 | [`.dockerignore`](.dockerignore) | Excludes local build artifacts (`build/`, `obj/`) and `.git` from the Docker build context. |
 

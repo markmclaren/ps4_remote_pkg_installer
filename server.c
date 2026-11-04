@@ -4,6 +4,7 @@
 #include "sfo.h"
 #include "http.h"
 #include "util.h"
+#include <pthread.h>
 
 #include <kernel_ex.h>
 #include <fcntl.h>
@@ -11,6 +12,117 @@
 
 #include <sandbird.h>
 #include <tiny-json.h>
+#include <uthash.h>
+
+struct tracked_task {
+	int task_id;
+	char title_name[256];
+	char content_id[PKG_CONTENT_ID_SIZE + 1];
+	time_t created_at;
+	bool has_cached_progress;
+	struct timespec cached_progress_ts;
+	struct bgft_download_task_progress_info cached_progress;
+	UT_hash_handle hh;
+};
+
+static struct tracked_task* s_tracked_tasks = NULL;
+static pthread_mutex_t s_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
+static unsigned int s_tmp_seq = 0;
+
+static void track_task_add(int task_id, const char* title_name, const char* content_id) {
+	struct tracked_task* item = NULL;
+	if (task_id < 0) {
+		return;
+	}
+	pthread_mutex_lock(&s_tasks_mutex);
+	HASH_FIND_INT(s_tracked_tasks, &task_id, item);
+	if (!item) {
+		item = (struct tracked_task*)malloc(sizeof(struct tracked_task));
+		if (item) {
+			memset(item, 0, sizeof(*item));
+			item->task_id = task_id;
+			if (title_name) {
+				strlcpy(item->title_name, title_name, sizeof(item->title_name));
+			}
+			if (content_id) {
+				strlcpy(item->content_id, content_id, sizeof(item->content_id));
+			}
+			item->created_at = time(NULL);
+			HASH_ADD_INT(s_tracked_tasks, task_id, item);
+		}
+	} else {
+		if (title_name && strlen(title_name) > 0) {
+			strlcpy(item->title_name, title_name, sizeof(item->title_name));
+		}
+		if (content_id && strlen(content_id) > 0) {
+			strlcpy(item->content_id, content_id, sizeof(item->content_id));
+		}
+	}
+	pthread_mutex_unlock(&s_tasks_mutex);
+}
+
+static void track_task_remove(int task_id) {
+	struct tracked_task* item = NULL;
+	if (task_id < 0) {
+		return;
+	}
+	pthread_mutex_lock(&s_tasks_mutex);
+	HASH_FIND_INT(s_tracked_tasks, &task_id, item);
+	if (item) {
+		HASH_DEL(s_tracked_tasks, item);
+		free(item);
+	}
+	pthread_mutex_unlock(&s_tasks_mutex);
+}
+
+static bool get_task_progress_cached(int task_id, struct bgft_download_task_progress_info* progress_info, int* err) {
+	struct tracked_task* item = NULL;
+	struct timespec now, diff;
+	bool have_now = (timespec_now(&now) != NULL);
+
+	if (task_id < 0 || !progress_info) {
+		return false;
+	}
+
+	pthread_mutex_lock(&s_tasks_mutex);
+	HASH_FIND_INT(s_tracked_tasks, &task_id, item);
+	if (item && item->has_cached_progress && have_now && timespec_compare(&now, &item->cached_progress_ts) >= 0) {
+		timespec_sub(&diff, &now, &item->cached_progress_ts);
+		if (diff.tv_sec == 0 && diff.tv_nsec < 400 * NSEC_PER_MSEC) {
+			*progress_info = item->cached_progress;
+			if (err) {
+				*err = 0;
+			}
+			pthread_mutex_unlock(&s_tasks_mutex);
+			return true;
+		}
+	}
+	pthread_mutex_unlock(&s_tasks_mutex);
+
+	if (!bgft_download_get_task_progress(task_id, progress_info, err)) {
+		return false;
+	}
+
+	have_now = (timespec_now(&now) != NULL);
+	pthread_mutex_lock(&s_tasks_mutex);
+	HASH_FIND_INT(s_tracked_tasks, &task_id, item);
+	if (!item) {
+		item = (struct tracked_task*)malloc(sizeof(struct tracked_task));
+		if (item) {
+			memset(item, 0, sizeof(*item));
+			item->task_id = task_id;
+			item->created_at = time(NULL);
+			HASH_ADD_INT(s_tracked_tasks, task_id, item);
+		}
+	}
+	if (item && have_now) {
+		item->cached_progress = *progress_info;
+		item->cached_progress_ts = now;
+		item->has_cached_progress = true;
+	}
+	pthread_mutex_unlock(&s_tasks_mutex);
+	return true;
+}
 
 #define CLEANUP_DAY_COUNT 3
 
@@ -60,6 +172,11 @@ static bool handle_api_get_task_progress(sb_Stream* s, const char* method, const
 static bool handle_api_find_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
 
 static bool handle_static(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
+static bool handle_dashboard(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
+static bool handle_docs(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
+static bool handle_openapi_spec(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
+static bool handle_openapi_yaml(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
+static bool handle_api_tasks(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size);
 
 static void kick_error(sb_Stream* s, int code, const char* title, const char* error);
 static void kick_result_header_json(sb_Stream* s);
@@ -69,6 +186,14 @@ static void kick_success_json(sb_Stream* s);
 static void cleanup_temp_files(void);
 
 static const struct handler_desc s_get_handlers[] = {
+	{ "/", &handle_dashboard, false },
+	{ "/index.html", &handle_dashboard, false },
+	{ "/status", &handle_dashboard, false },
+	{ "/docs", &handle_docs, false },
+	{ "/swagger", &handle_docs, false },
+	{ "/openapi.json", &handle_openapi_spec, false },
+	{ "/openapi.yaml", &handle_openapi_yaml, false },
+	{ "/api/tasks", &handle_api_tasks, false },
 	{ "/static/", &handle_static, true },
 };
 static const struct handler_desc s_post_handlers[] = {
@@ -119,9 +244,9 @@ bool server_start(const char* ip_address, int port, const char* work_dir) {
 
 		opts.port = port_str;
 		opts.handler = &event_handler;
-		opts.timeout = "0";
-		opts.max_lifetime = "0";
-		opts.max_request_size = "0";
+		opts.timeout = "15000";
+		opts.max_lifetime = "60000";
+		opts.max_request_size = "10485760";
 	}
 
 	s_server = sb_new_server(&opts);
@@ -177,6 +302,15 @@ void server_stop(void) {
 	s_ip_address = NULL;
 	s_port = 0;
 
+	pthread_mutex_lock(&s_tasks_mutex);
+	struct tracked_task *item, *tmp;
+	HASH_ITER(hh, s_tracked_tasks, item, tmp) {
+		HASH_DEL(s_tracked_tasks, item);
+		free(item);
+	}
+	s_tracked_tasks = NULL;
+	pthread_mutex_unlock(&s_tasks_mutex);
+
 	s_server_started = false;
 }
 
@@ -226,6 +360,11 @@ bad_request:
 	}
 
 	in_data = sb_get_content_data(e->stream, &in_size);
+	if (strcasecmp(e->method, "POST") == 0 && (!in_data || in_size == 0)) {
+		kick_error(e->stream, 400, "Bad request", "Empty request body");
+		ret = SB_RES_OK;
+		goto done;
+	}
 
 	(*handler)(e->stream, e->method, e->path, in_data, in_size);
 
@@ -326,7 +465,7 @@ static inline bool handle_api_install_direct(sb_Stream* s, const json_t* root) {
 		unescaped_url = NULL;
 	}
 
-	snprintf(tmp_name, sizeof(tmp_name), "tmp_%" PRIxMAX, (uintmax_t)sb_stream_get_init_time(s) ^ (uint32_t)(uintptr_t)s);
+	snprintf(tmp_name, sizeof(tmp_name), "tmp_%" PRIxMAX "_%u", (uintmax_t)sb_stream_get_init_time(s) ^ (uint32_t)(uintptr_t)s, __sync_fetch_and_add(&s_tmp_seq, 1));
 
 	snprintf(ref_pkg_json_path, sizeof(ref_pkg_json_path), "%s/%s.json", s_work_dir, tmp_name);
 	snprintf(param_sfo_path, sizeof(param_sfo_path), "%s/%s.sfo", s_work_dir, tmp_name);
@@ -391,6 +530,7 @@ static inline bool handle_api_install_direct(sb_Stream* s, const json_t* root) {
 	snprintf(icon_path, sizeof(icon_path), "/user%s/%s.png", s_work_dir, tmp_name);
 
 	if (bgft_download_register_package_task(content_id, content_url, title_name, has_icon ? icon_path : NULL, package_type, package_sub_type, package_size, is_patch, &task_id, &ret)) {
+		track_task_add(task_id, title_name, content_id);
 		kick_result_header_json(s);
 		sb_writef(s, "{ \"status\": \"success\", \"task_id\": %d, \"title\": \"%s\" }\n", task_id, escaped_title_name);
 	} else {
@@ -511,7 +651,7 @@ static inline bool handle_api_install_ref_pkg_url(sb_Stream* s, const json_t* ro
 		THROW_ERROR("Unable to extract pieces URLs for %s'.", unescaped_url);
 	}
 
-	snprintf(tmp_name, sizeof(tmp_name), "tmp_%" PRIxMAX, (uintmax_t)sb_stream_get_init_time(s) ^ (uint32_t)(uintptr_t)s);
+	snprintf(tmp_name, sizeof(tmp_name), "tmp_%" PRIxMAX "_%u", (uintmax_t)sb_stream_get_init_time(s) ^ (uint32_t)(uintptr_t)s, __sync_fetch_and_add(&s_tmp_seq, 1));
 
 	snprintf(ref_pkg_json_path, sizeof(ref_pkg_json_path), "%s/%s.json", s_work_dir, tmp_name);
 	snprintf(param_sfo_path, sizeof(param_sfo_path), "%s/%s.sfo", s_work_dir, tmp_name);
@@ -576,6 +716,7 @@ static inline bool handle_api_install_ref_pkg_url(sb_Stream* s, const json_t* ro
 	snprintf(icon_path, sizeof(icon_path), "/user%s/%s.png", s_work_dir, tmp_name);
 
 	if (bgft_download_register_package_task(content_id, content_url, title_name, has_icon ? icon_path : NULL, package_type, package_sub_type, package_size, is_patch, &task_id, &ret)) {
+		track_task_add(task_id, title_name, content_id);
 		kick_result_header_json(s);
 		sb_writef(s, "{ \"status\": \"success\", \"task_id\": %d, \"title\": \"%s\" }\n", task_id, escaped_title_name);
 	} else {
@@ -631,7 +772,7 @@ err:
 }
 
 static bool handle_api_install(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -685,7 +826,7 @@ err:
 }
 
 static bool handle_api_uninstall_game(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -742,7 +883,7 @@ err:
 }
 
 static bool handle_api_uninstall_ac(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -799,7 +940,7 @@ err:
 }
 
 static bool handle_api_uninstall_patch(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -856,7 +997,7 @@ err:
 }
 
 static bool handle_api_uninstall_theme(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -913,7 +1054,7 @@ err:
 }
 
 static bool handle_api_is_exists(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -979,7 +1120,7 @@ err:
 }
 
 static bool handle_api_start_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1039,7 +1180,7 @@ err:
 }
 
 static bool handle_api_stop_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1099,7 +1240,7 @@ err:
 }
 
 static bool handle_api_pause_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1159,7 +1300,7 @@ err:
 }
 
 static bool handle_api_resume_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1219,7 +1360,7 @@ err:
 }
 
 static bool handle_api_unregister_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1258,6 +1399,7 @@ static bool handle_api_unregister_task(sb_Stream* s, const char* method, const c
 	}
 
 	if (bgft_download_unregister_task(task_id, &ret)) {
+		track_task_remove(task_id);
 		kick_result_header_json(s);
 		sb_writef(s, "{ \"status\": \"success\" }\n");
 	} else {
@@ -1279,7 +1421,7 @@ err:
 }
 
 static bool handle_api_get_task_progress(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1318,7 +1460,7 @@ static bool handle_api_get_task_progress(sb_Stream* s, const char* method, const
 		THROW_ERROR("Invalid value for '%s' parameter specified.", "task_id");
 	}
 
-	if (bgft_download_get_task_progress(task_id, &progress_info, &ret)) {
+	if (get_task_progress_cached(task_id, &progress_info, &ret)) {
 		kick_result_header_json(s);
 
 		/* TODO: make bits field more user-friendly */
@@ -1345,7 +1487,7 @@ err:
 }
 
 static bool handle_api_find_task(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	static json_t* pool = NULL;
+	json_t* pool = NULL;
 	const size_t pool_size = 256;
 	const json_t* root;
 	const json_t* field;
@@ -1394,6 +1536,7 @@ static bool handle_api_find_task(sb_Stream* s, const char* method, const char* p
 	sub_type = val.ival;
 
 	if (bgft_download_find_task_by_content_id(content_id, sub_type, &task_id, &ret)) {
+		track_task_add(task_id, NULL, content_id);
 		kick_result_header_json(s);
 		sb_writef(s, "{ \"status\": \"success\", \"task_id\": %d }\n", task_id);
 	} else {
@@ -1415,7 +1558,7 @@ err:
 }
 
 static bool handle_static(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
-	struct stat stbuf;
+	SceKernelStat stbuf;
 	const char* content_type;
 	char real_path[SCE_KERNEL_PATH_MAX];
 	int ret;
@@ -1433,14 +1576,14 @@ static bool handle_static(sb_Stream* s, const char* method, const char* path, ch
 
 	snprintf(real_path, sizeof(real_path), "%s/%s", s_work_dir, path);
 
-	ret = stat(real_path, &stbuf);
+	ret = sceKernelStat(real_path, &stbuf);
 	if (ret < 0) {
 		kick_error(s, 404, "Not found", "Page not found");
 		ret = SB_RES_OK;
 		goto done;
 	}
 
-	if (!S_ISREG(stbuf.st_mode)) {
+	if (!SCE_KERNEL_S_ISREG(stbuf.st_mode)) {
 		kick_error(s, 403, "Forbidden", "Access is denied");
 		ret = SB_RES_OK;
 		goto done;
@@ -1466,6 +1609,133 @@ static bool handle_static(sb_Stream* s, const char* method, const char* path, ch
 
 done:
 	return (ret == SB_RES_OK);
+}
+
+static bool serve_web_file(sb_Stream* s, const char* filename, const char* content_type) {
+	char full_path[SCE_KERNEL_PATH_MAX];
+	const char* const search_dirs[] = {
+		"/data/web",
+		"/app0/web",
+		"web",
+		NULL
+	};
+	int i;
+
+	for (i = 0; search_dirs[i] != NULL; ++i) {
+		snprintf(full_path, sizeof(full_path), "%s/%s", search_dirs[i], filename);
+		if (is_file_exists(full_path)) {
+			sb_send_status(s, 200, "OK");
+			sb_send_header(s, "Content-Type", content_type);
+			sb_send_header(s, "Access-Control-Allow-Origin", "*");
+			sb_send_header(s, "Connection", "close");
+			if (sb_send_file(s, full_path) == SB_ESUCCESS) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static bool handle_dashboard(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
+	assert(s != NULL);
+	if (serve_web_file(s, "index.html", "text/html; charset=utf-8")) {
+		return true;
+	}
+	kick_error(s, 404, "Not Found", "Template 'web/index.html' not found in /data/web, /app0/web, or web/.");
+	return true;
+}
+
+static bool handle_docs(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
+	assert(s != NULL);
+	if (serve_web_file(s, "docs.html", "text/html; charset=utf-8")) {
+		return true;
+	}
+	kick_error(s, 404, "Not Found", "Template 'web/docs.html' not found in /data/web, /app0/web, or web/.");
+	return true;
+}
+
+static bool handle_openapi_spec(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
+	assert(s != NULL);
+	if (serve_web_file(s, "openapi.json", "application/json; charset=utf-8")) {
+		return true;
+	}
+	kick_error(s, 404, "Not Found", "File 'web/openapi.json' not found in /data/web, /app0/web, or web/.");
+	return true;
+}
+
+static bool handle_openapi_yaml(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
+	assert(s != NULL);
+	if (serve_web_file(s, "openapi.yaml", "text/yaml; charset=utf-8")) {
+		return true;
+	}
+	kick_error(s, 404, "Not Found", "File 'web/openapi.yaml' not found in /data/web, /app0/web, or web/.");
+	return true;
+}
+
+static bool handle_api_tasks(sb_Stream* s, const char* method, const char* path, char* in_data, size_t in_size) {
+	struct task_snapshot {
+		int task_id;
+		char title_name[256];
+		char content_id[PKG_CONTENT_ID_SIZE + 1];
+	};
+	struct task_snapshot snapshots[64];
+	size_t snapshot_count = 0;
+	size_t i;
+	struct tracked_task *item, *tmp;
+	struct bgft_download_task_progress_info progress;
+	bool first = true;
+	int ret;
+
+	assert(s != NULL);
+
+	pthread_mutex_lock(&s_tasks_mutex);
+	HASH_ITER(hh, s_tracked_tasks, item, tmp) {
+		if (snapshot_count < ARRAY_SIZE(snapshots)) {
+			snapshots[snapshot_count].task_id = item->task_id;
+			strlcpy(snapshots[snapshot_count].title_name, item->title_name, sizeof(snapshots[snapshot_count].title_name));
+			strlcpy(snapshots[snapshot_count].content_id, item->content_id, sizeof(snapshots[snapshot_count].content_id));
+			++snapshot_count;
+		}
+	}
+	pthread_mutex_unlock(&s_tasks_mutex);
+
+	kick_result_header_json(s);
+	sb_writef(s, "{\"status\":\"success\",\"tasks\":[");
+
+	for (i = 0; i < snapshot_count; ++i) {
+		if (get_task_progress_cached(snapshots[i].task_id, &progress, &ret)) {
+			char escaped_title[512];
+			if (!http_escape_json_string(escaped_title, sizeof(escaped_title), snapshots[i].title_name)) {
+				strlcpy(escaped_title, snapshots[i].title_name, sizeof(escaped_title));
+			}
+			if (!first) {
+				sb_writef(s, ",");
+			}
+			first = false;
+			sb_writef(s,
+				"{\"task_id\":%d,\"title\":\"%s\",\"content_id\":\"%s\",\"bits\":%" PRIu32 ",\"bits_hex\":\"0x%" PRIX32 "\",\"error\":%d,\"length\":%" PRIu64 ",\"transferred\":%" PRIu64 ",\"length_total\":%" PRIu64 ",\"transferred_total\":%" PRIu64 ",\"num_index\":%" PRIu32 ",\"num_total\":%" PRIu32 ",\"rest_sec\":%" PRIu32 ",\"rest_sec_total\":%" PRIu32 ",\"preparing_percent\":%" PRId32 ",\"local_copy_percent\":%" PRId32 "}",
+				snapshots[i].task_id,
+				escaped_title,
+				snapshots[i].content_id,
+				progress.bits,
+				progress.bits,
+				progress.error_result,
+				(uint64_t)progress.length,
+				(uint64_t)progress.transferred,
+				(uint64_t)progress.length_total,
+				(uint64_t)progress.transferred_total,
+				progress.num_index,
+				progress.num_total,
+				progress.rest_sec,
+				progress.rest_sec_total,
+				progress.preparing_percent,
+				progress.local_copy_percent
+			);
+		}
+	}
+
+	sb_writef(s, "]}\n");
+	return true;
 }
 
 static void kick_error(sb_Stream* s, int code, const char* title, const char* error) {

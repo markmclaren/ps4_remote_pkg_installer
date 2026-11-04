@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PS4 Remote PKG Installer</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --accent: #0284c7;
+      --accent-hover: #0369a1;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .title-group h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: #0369a122;
+      color: #38bdf8;
+      border: 1px solid #0284c744;
+    }
+    .badge .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .nav-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .nav-btn:hover {
+      background: #334155;
+      border-color: var(--accent);
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .stat-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+    .section-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #e2e8f0;
+    }
+    .task-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      gap: 12px;
+    }
+    .task-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      word-break: break-all;
+    }
+    .task-sub {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-family: monospace;
+      margin-top: 2px;
+    }
+    .status-pill {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .status-downloading {
+      background: #0284c733;
+      color: #38bdf8;
+      border: 1px solid #0284c7;
+    }
+    .status-installing {
+      background: #f59e0b33;
+      color: #fbbf24;
+      border: 1px solid #f59e0b;
+    }
+    .status-installed {
+      background: #10b98133;
+      color: #34d399;
+      border: 1px solid #10b981;
+    }
+    .status-paused {
+      background: #64748b33;
+      color: #94a3b8;
+      border: 1px solid #64748b;
+    }
+    .status-stopped {
+      background: #ef444433;
+      color: #f87171;
+      border: 1px solid #ef4444;
+    }
+    .bar-wrap {
+      background: #0f172a;
+      height: 12px;
+      border-radius: 9999px;
+      overflow: hidden;
+      margin: 12px 0;
+      border: 1px solid #1e293b;
+    }
+    .bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #0284c7, #38bdf8);
+      border-radius: 9999px;
+      transition: width 0.4s ease;
+    }
+    .task-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .task-meta span {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: var(--border);
+      color: var(--text);
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #475569;
+    }
+    button.primary {
+      background: var(--accent);
+    }
+    button.primary:hover {
+      background: var(--accent-hover);
+    }
+    button.danger {
+      background: #991b1b;
+    }
+    button.danger:hover {
+      background: #b91c1c;
+    }
+    .empty-card {
+      background: var(--card);
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .empty-card h3 {
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .tools-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 32px;
+    }
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    input {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      flex: 1;
+      font-size: 0.9rem;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    #tool-res {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="title-group">
+      <h1>PS4 Remote PKG Installer</h1>
+      <span class="badge"><span class="dot"></span> Online :12800</span>
+    </div>
+    <div class="nav-actions">
+      <a href="/docs" class="nav-btn" title="Open Interactive API Docs">📖 Swagger Docs</a>
+      <div id="clock" style="font-size:0.85rem;color:var(--muted)"></div>
+    </div>
+  </header>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Active Tasks</div>
+      <div class="stat-value" id="stat-tasks">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Speed</div>
+      <div class="stat-value" id="stat-speed">0 MB/s</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Auto Refresh</div>
+      <div class="stat-value" style="color:var(--green)">Every 1s</div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Current Transfers & Installations</h2>
+  <div id="tasks-container">
+    <div class="empty-card">
+      <h3>Waiting for Packages...</h3>
+      <p>Send a PKG from your PC using the CLI or cURL to start installing.</p>
+    </div>
+  </div>
+
+  <div class="tools-card">
+    <h3 style="font-size:1rem;margin-bottom:8px">Quick Check: Title ID Installed?</h3>
+    <div class="input-row">
+      <input type="text" id="check-title" placeholder="e.g. CUSA09311">
+      <button class="primary" onclick="checkTitle()">Check Title</button>
+    </div>
+    <div id="tool-res"></div>
+  </div>
+</div>
+
+<script>
+const prevSamples = {};
+
+function formatBytes(bytes) {
+  if (bytes === 0 || !bytes) return '0 B';
+  const k = 1024, dm = 2, sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+function formatTime(sec) {
+  if (!sec || sec <= 0) return '-';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60), remM = m % 60;
+    return `${h}h ${remM}m`;
+  }
+  return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+}
+
+function getStatus(bits) {
+  const b = typeof bits === 'string' ? parseInt(bits, 16) : bits;
+  switch (b) {
+    case 0x18a: return { text: 'Downloading', cls: 'status-downloading' };
+    case 0x18e: return { text: 'Installing', cls: 'status-installing' };
+    case 0x193: return { text: 'Installed', cls: 'status-installed' };
+    case 0x1a8: return { text: 'Paused', cls: 'status-paused' };
+    case 0x188: return { text: 'Stopped', cls: 'status-stopped' };
+    default: return { text: 'In Progress', cls: 'status-downloading' };
+  }
+}
+
+async function apiCall(endpoint, data) {
+  try {
+    const res = await fetch('/api/' + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function pauseTask(id) { await apiCall('pause_task', { task_id: id }); refresh(); }
+async function resumeTask(id) { await apiCall('resume_task', { task_id: id }); refresh(); }
+async function stopTask(id) { if (confirm('Stop task ' + id + '?')) { await apiCall('stop_task', { task_id: id }); refresh(); } }
+async function removeTask(id) { if (confirm('Remove task ' + id + '?')) { await apiCall('unregister_task', { task_id: id }); refresh(); } }
+
+let isRefreshing = false;
+
+async function refresh() {
+  if (isRefreshing) return;
+  isRefreshing = true;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch('/api/tasks', { signal: controller.signal });
+    const data = await res.json();
+    const tasks = data.tasks || [];
+    document.getElementById('stat-tasks').innerText = tasks.length;
+    let totalSpeedBps = 0;
+    const now = Date.now();
+
+    const container = document.getElementById('tasks-container');
+    if (tasks.length === 0) {
+      container.innerHTML = `
+        <div class="empty-card">
+          <h3>No Active Downloads</h3>
+          <p>Send a PKG from your PC using the CLI or cURL to start installing.</p>
+        </div>`;
+      document.getElementById('stat-speed').innerText = '0 MB/s';
+      return;
+    }
+
+    let html = '';
+    for (const t of tasks) {
+      const st = getStatus(t.bits);
+      const transferred = t.transferred_total || t.transferred || 0;
+      const total = t.length_total || t.length || 0;
+      const pct = total > 0 ? Math.min(100, (transferred / total) * 100).toFixed(1) : '0.0';
+
+      let speedBps = 0;
+      const prev = prevSamples[t.task_id];
+      if (prev && transferred >= prev.bytes) {
+        const dt = (now - prev.time) / 1000;
+        if (dt > 0.4) {
+          speedBps = (transferred - prev.bytes) / dt;
+        }
+      }
+      prevSamples[t.task_id] = { bytes: transferred, time: now };
+      totalSpeedBps += speedBps;
+
+      const restSec = t.rest_sec_total || t.rest_sec || 0;
+      const partStr = (t.num_total > 1) ? `Part ${t.num_index + 1} of ${t.num_total}` : '';
+
+      html += `
+        <div class="task-card">
+          <div class="task-header">
+            <div>
+              <div class="task-title">${t.title || 'Task #' + t.task_id}</div>
+              <div class="task-sub">ID: ${t.task_id} &bull; ${t.content_id || 'Direct PKG'}</div>
+            </div>
+            <span class="status-pill ${st.cls}">${st.text}</span>
+          </div>
+
+          <div class="bar-wrap">
+            <div class="bar-fill" style="width:${pct}%"></div>
+          </div>
+
+          <div class="task-meta">
+            <div>Progress: <span>${pct}%</span></div>
+            <div>Transferred: <span>${formatBytes(transferred)} / ${formatBytes(total)}</span></div>
+            <div>Speed: <span>${speedBps > 1024 ? formatBytes(speedBps) + '/s' : '-'}</span></div>
+            <div>ETA: <span>${st.text === 'Downloading' ? formatTime(restSec) : '-'}</span></div>
+            ${partStr ? `<div>File: <span>${partStr}</span></div>` : ''}
+          </div>
+
+          <div class="btn-group">
+            ${st.text === 'Paused' ? `<button class="primary" onclick="resumeTask(${t.task_id})">Resume</button>` : `<button onclick="pauseTask(${t.task_id})">Pause</button>`}
+            <button class="danger" onclick="stopTask(${t.task_id})">Stop</button>
+            <button onclick="removeTask(${t.task_id})">Remove</button>
+          </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+    document.getElementById('stat-speed').innerText = totalSpeedBps > 1024 ? formatBytes(totalSpeedBps) + '/s' : '0 MB/s';
+  } catch (e) {
+    console.error(e);
+  } finally {
+    clearTimeout(timeoutId);
+    isRefreshing = false;
+  }
+}
+
+async function checkTitle() {
+  const val = document.getElementById('check-title').value.trim();
+  const resEl = document.getElementById('tool-res');
+  if (!val) return;
+  resEl.innerText = 'Checking...';
+  const data = await apiCall('is_exists', { title_id: val });
+  if (data && data.status === 'success') {
+    resEl.innerHTML = `<span style="color:${data.exists === 'true' ? 'var(--green)' : 'var(--yellow)'}">Title ${val}: ${data.exists === 'true' ? 'INSTALLED (Size: ' + formatBytes(data.size) + ')' : 'NOT INSTALLED'}</span>`;
+  } else {
+    resEl.innerHTML = `<span style="color:var(--red)">Check failed: ${JSON.stringify(data)}</span>`;
+  }
+}
+
+async function scheduleRefresh() {
+  await refresh();
+  setTimeout(scheduleRefresh, 1500);
+}
+
+setInterval(() => {
+  const clockEl = document.getElementById('clock');
+  if (clockEl) clockEl.innerText = new Date().toLocaleTimeString();
+}, 1000);
+scheduleRefresh();
+</script>
+</body>
+</html>
+
